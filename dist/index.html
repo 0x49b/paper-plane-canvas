@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Canvas Boilerplate – Responsive</title>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Kode+Mono:wght@400..700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #535c68;
+      --fg: #95afc0;
+    }
+
+    * {
+      box-sizing: border-box;
+      user-select: none;
+    }
+
+    html,
+    body {
+      height: 100%;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      overflow: hidden;
+      font-family: "Kode Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    }
+
+    canvas {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100svh;
+      display: block;
+      z-index: 0;
+    }
+
+    .kbd-container {
+      position: fixed;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 1;
+      list-style-type: none;
+      padding: 0;
+      margin: 0;
+    }
+
+    .kbd-container li {
+      display: inline;
+      margin: 0.2rem;
+    }
+
+    kbd {
+      font-weight: 900;
+      white-space: nowrap;
+      font-size: clamp(5rem, min(18vw, 18svh), 1rem);
+      line-height: 1;
+      letter-spacing: 0.059em;
+
+      color: var(--fg);
+      background: var(--bg);
+      border: 0.147em solid var(--fg);
+      box-shadow: 0.143em 0.143em var(--fg);
+      padding: 0.184em 0.331em;
+    }
+
+    @media (max-width: 26.25rem) {
+      kbd {
+        letter-spacing: 0.04em;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <ul class="kbd-container">
+    <li><kbd>f</kbd></li>
+    <li></li><kbd>KBD</kbd></li>
+  </ul>
+  <canvas aria-hidden="true"></canvas>
+
+  <script>
+    (function () {
+      const canvas = document.querySelector('canvas');
+      const ctx = canvas.getContext('2d');
+
+      function resizeCanvas() {
+        const dpr = Math.min(window.devicePixelRatio || 1, 2); // cap for perf
+        const cssW = window.innerWidth;
+        const cssH = window.innerHeight;
+
+        // Size the canvas in CSS pixels
+        canvas.style.width = cssW + 'px';
+        canvas.style.height = cssH + 'px';
+
+        // Match the backing store to device pixels for crispness
+        canvas.width = Math.round(cssW * dpr);
+        canvas.height = Math.round(cssH * dpr);
+
+        // Normalize drawing units to CSS pixels
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        draw();
+      }
+
+      function draw() {
+        // Transparent canvas lets the body's grey show through.
+        // Clear using CSS pixel units thanks to setTransform above.
+        ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+      }
+
+      window.addEventListener('resize', resizeCanvas, { passive: true });
+      resizeCanvas();
+    })();
+  </script>
+<script src="js/canvas.bundle.js"></script></body>
+
+</html>

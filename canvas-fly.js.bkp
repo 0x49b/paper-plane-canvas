@@ -1,0 +1,238 @@
+const canvas = document.querySelector('canvas')
+const c = canvas.getContext('2d')
+
+const grid = 45
+
+canvas.width = innerWidth
+canvas.height = innerHeight
+
+const mouse = {
+  x: innerWidth / 2,
+  y: innerHeight / 2
+}
+
+// Easing for time progression around the loop
+const easeInOutQuad = t => (t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t + 2, 2)/2)
+
+// -------------------------------- Events --------------------------------
+addEventListener('mousemove', e => {
+  mouse.x = e.clientX
+  mouse.y = e.clientY
+})
+
+addEventListener('resize', () => {
+  canvas.width = innerWidth
+  canvas.height = innerHeight
+  init()
+})
+
+// Only the 4 closest planes to the click point fly
+addEventListener('click', (e) => {
+  if (!planes || planes.length === 0) return
+
+  const cx = e.clientX
+  const cy = e.clientY
+
+  const nearest = planes
+    .filter(p => p.state === 'idle')
+    .map(p => {
+      const dx = p.x - cx
+      const dy = p.y - cy
+      return [dx*dx + dy*dy, p]
+    })
+    .sort((a, b) => a[0] - b[0])
+    .slice(0, 4)
+
+  nearest.forEach(([_, p]) => {
+    const delay = Math.random() * 200
+    setTimeout(() => p.triggerLoop(), delay)
+  })
+})
+
+// ------------------------------- Plane ----------------------------------
+function Plane(x, y, color, scaleFactor) {
+  this.x = x
+  this.y = y
+  this.color = color
+  this.scaleFactor = scaleFactor
+
+  // home
+  this.ox = x
+  this.oy = y
+
+  // state
+  this.state = 'idle' // 'idle' | 'loop'
+  this.t0 = 0
+  this.dur = 1600 // ms (randomized per loop)
+  this.angle = 0  // visual heading
+
+  // loop params (set per flight)
+  this.cx = 0; this.cy = 0   // center of ellipse
+  this.a = 0;  this.b = 0    // radii
+  this.rot = 0               // rotation of ellipse (radians)
+  this.cr = 1; this.sr = 0   // precomputed cos/sin(rot)
+  this.phi0 = 0              // starting param angle so pos at t=0 equals origin
+}
+
+Plane.prototype.draw = function() {
+  c.save()
+
+  // If idle, face mouse; if looping, use path tangent angle
+  let angle = this.angle
+  if (this.state === 'idle') {
+    const dx = mouse.x - this.x
+    const dy = mouse.y - this.y
+    angle = Math.atan2(dy, dx)
+  }
+
+  // === Rotate about the plane's CENTER, not the nose ===
+  // The nose is at local (0,0). Tail is around (-30,0).
+  // Center ≈ halfway: (-15, 0) in local coords (scaled).
+  const pivotX = -15 * this.scaleFactor
+
+  // Move to world pivot (center), rotate, then shift so we can draw with original coordinates
+  c.translate(this.x + pivotX, this.y)
+  c.rotate(angle)
+  c.translate(-pivotX, 0)
+
+  // --- Draw the plane (same shape as before) ---
+  c.beginPath()
+  c.moveTo(0, 0) // nose
+  c.lineTo(-30 * this.scaleFactor, -11 * this.scaleFactor)
+  c.lineTo(-26 * this.scaleFactor, 0)
+  c.lineTo(-30 * this.scaleFactor, 11 * this.scaleFactor)
+  c.lineTo(0, 0)
+  c.moveTo(-26 * this.scaleFactor, 0)
+  c.lineTo(1, 0)
+
+  c.strokeStyle = this.color
+  c.lineWidth = 1 * this.scaleFactor
+  c.stroke()
+  c.closePath()
+  c.restore()
+}
+
+Plane.prototype.update = function(now) {
+  if (this.state === 'loop') {
+    const rawt = Math.min(1, (now - this.t0) / this.dur)
+    const t = easeInOutQuad(rawt)
+
+    // Progress around the ellipse once
+    const phi = this.phi0 + t * Math.PI * 2
+
+    // Ellipse param in local coords
+    const ex = this.a * Math.cos(phi)
+    const ey = this.b * Math.sin(phi)
+
+    // Rotate + translate to world
+    const wx = this.cx + (ex * this.cr - ey * this.sr)
+    const wy = this.cy + (ex * this.sr + ey * this.cr)
+
+    // IMPORTANT: this.x / this.y represent the NOSE position.
+    // We keep that consistent so visuals don't shift.
+    this.x = wx
+    this.y = wy
+
+    // Tangent derivative in local coords: [-a sinφ, b cosφ]
+    const tx = -this.a * Math.sin(phi)
+    const ty =  this.b * Math.cos(phi)
+
+    // Rotate derivative to world (same rotation matrix)
+    const twx = (tx * this.cr - ty * this.sr)
+    const twy = (tx * this.sr + ty * this.cr)
+
+    if (Math.hypot(twx, twy) > 1e-6) {
+      this.angle = Math.atan2(twy, twx)
+    }
+
+    if (rawt >= 1) {
+      // snap home to avoid any float error
+      this.state = 'idle'
+      this.x = this.ox
+      this.y = this.oy
+    }
+  }
+
+  this.draw()
+}
+
+// Create a smooth one-loop path that starts/ends at origin (ox,oy)
+Plane.prototype.startLoop = function(durationMs) {
+  this.state = 'loop'
+  this.t0 = performance.now()
+  this.dur = durationMs
+
+  // Random loop center offset from origin (how far the loop is from home)
+  const dir = Math.random() * Math.PI * 2
+  const dist = grid * (2 + Math.random() * 6) // 2–8 grid-ish
+  let cx = this.ox + Math.cos(dir) * dist
+  let cy = this.oy + Math.sin(dir) * dist
+
+  // Radii (ellipse size)
+  let a = dist * (0.7 + Math.random() * 0.8)          // 0.7–1.5x dist
+  let b = a * (0.5 + Math.random() * 0.9)             // 0.5–1.4x a
+  let rot = Math.random() * Math.PI * 2                // arbitrary orientation
+
+  // Keep the loop fully inside the canvas by shrinking if needed
+  const maxR = Math.max(a, b)
+  const margin = 10
+  const maxAllowed = Math.min(
+    cx - margin,
+    canvas.width - cx - margin,
+    cy - margin,
+    canvas.height - cy - margin
+  )
+  if (maxAllowed < maxR) {
+    const s = Math.max(0.2, maxAllowed / maxR)
+    a *= s; b *= s;
+  }
+
+  // Precompute rotation cos/sin
+  this.cx = cx; this.cy = cy
+  this.a = a; this.b = b
+  this.rot = rot
+  this.cr = Math.cos(rot)
+  this.sr = Math.sin(rot)
+
+  // Find φ0 so the loop starts at the origin (nose position)
+  const vx = this.ox - this.cx
+  const vy = this.oy - this.cy
+  const lx =  vx * this.cr + vy * this.sr // rotate by -rot
+  const ly = -vx * this.sr + vy * this.cr
+
+  this.phi0 = Math.atan2(ly / this.b, lx / this.a)
+
+  // Initialize heading tangent at φ0
+  const tx = -this.a * Math.sin(this.phi0)
+  const ty =  this.b * Math.cos(this.phi0)
+  const twx = (tx * this.cr - ty * this.sr)
+  const twy = (tx * this.sr + ty * this.cr)
+  this.angle = Math.atan2(twy, twx)
+}
+
+Plane.prototype.triggerLoop = function() {
+  if (this.state !== 'idle') return
+  const dur = 1400 + Math.random() * 1000 // 1.4s–2.4s
+  this.startLoop(dur)
+}
+
+// --------------------------- Implementation -----------------------------
+let planes = []
+function init() {
+  planes = []
+  for (let x = 1; x < canvas.width / grid; x++) {
+    for (let y = 1; y < canvas.height / grid; y++) {
+      planes.push(new Plane(x*grid - (grid/2), y*grid - (grid/2), 'black', 1))
+    }
+  }
+}
+
+function animate(now) {
+  requestAnimationFrame(animate)
+  c.clearRect(0, 0, canvas.width, canvas.height)
+  const t = now || performance.now()
+  planes.forEach(p => p.update(t))
+}
+
+init()
+animate()
